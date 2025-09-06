@@ -1,15 +1,19 @@
 #!/bin/bash
-# Proxy SOCKS5 trên EC2 với thông số tùy chỉnh bên ngoài
+# Proxy SOCKS5 tối ưu cho EC2
+# Tùy chỉnh user/pass/port và Telegram ngoài script
 
-# Proxy mặc định (có thể override)
+# ------------------------
+# Cấu hình proxy (có thể override)
 PORT="${PORT:-8888}"
 USERNAME="${USER:-proxyuser}"
 PASSWORD="${PASS:-proxypass}"
 
-# Telegram mặc định (có thể override)
+# ------------------------
+# Telegram (có thể override)
 BOT_TOKEN="${BOT_TOKEN:-}"
 CHAT_ID="${CHAT_ID:-}"
 
+# ------------------------
 install_dependencies() {
   export DEBIAN_FRONTEND=noninteractive
   apt update -y
@@ -22,7 +26,7 @@ setup_proxy() {
   # Lấy network interface chính EC2
   IFACE=$(ip route get 1.1.1.1 | awk '{print $5; exit}')
 
-  # Cấu hình Dante
+  # Tạo file cấu hình Dante
   cat >/etc/danted.conf <<EOF
 logoutput: syslog
 internal: 0.0.0.0 port = $PORT
@@ -40,28 +44,32 @@ socks pass {
 }
 EOF
 
-  # Tạo user proxy
+  # Tạo user proxy nếu chưa tồn tại
   id -u "$USERNAME" &>/dev/null || useradd -M -s /bin/false "$USERNAME"
   echo "$USERNAME:$PASSWORD" | chpasswd
 
-  # Khởi động proxy
+  # Khởi động và bật Dante
   systemctl restart danted
   systemctl enable danted
 
-  # Mở firewall EC2 (Security Group vẫn cần mở TCP PORT)
+  # Mở port cho firewall EC2 (iptables)
   iptables -C INPUT -p tcp --dport "$PORT" -j ACCEPT 2>/dev/null || \
     iptables -A INPUT -p tcp --dport "$PORT" -j ACCEPT
 }
 
+# ------------------------
 # Chạy proxy
 setup_proxy
 
-# Gửi thông tin proxy về Telegram nếu BOT_TOKEN và CHAT_ID tồn tại
+# ------------------------
+# Gửi proxy về Telegram nếu có BOT_TOKEN và CHAT_ID
 if [[ -n "$BOT_TOKEN" && -n "$CHAT_ID" ]]; then
     PUBLIC_IP=$(curl -s ifconfig.me)
     PROXY_INFO="$PUBLIC_IP:$PORT:$USERNAME:$PASSWORD"
     curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
         -d chat_id="$CHAT_ID" \
         -d text="$PROXY_INFO"
-    echo "[INFO] Proxy đã gửi về Telegram dạng IP:PORT:USER:PASS"
+    echo "[INFO] Proxy đã gửi về Telegram dưới dạng IP:PORT:USER:PASS"
+else
+    echo "[INFO] BOT_TOKEN hoặc CHAT_ID chưa được cung cấp. Proxy vẫn chạy."
 fi
